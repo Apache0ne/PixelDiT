@@ -1,6 +1,7 @@
 # PixelDiT2 dependency versions retained from the existing release recipe.
 # Install in a separate environment from requirements-pixeldit1.txt.
-# Colab currently ships a transformers build that requires safetensors>=0.8.0.
+# Current Colab/Python 3.13 needs a recent jsonargparse because argparse internals changed.
+# Current Colab transformers also requires safetensors>=0.8.0.
 --extra-index-url https://download.pytorch.org/whl/cu124
 torch==2.5.1+cu124
 torchvision==0.20.1+cu124
@@ -13,7 +14,7 @@ numpy==2.2.6
 pillow==12.1.1
 omegaconf==2.3.0
 diffusers==0.30.0
-jsonargparse[signatures]==4.27.7
+jsonargparse[signatures]>=4.50.0
 safetensors>=0.8.0
 tokenizers==0.22.2
 huggingface-hub==1.7.1
