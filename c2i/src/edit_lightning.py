@@ -18,8 +18,12 @@ class EditLightningModel(LightningModel):
 
         default_start = getattr(
             self.diffusion_sampler,
-            "edit_t_min",
-            getattr(self.diffusion_sampler, "t_start", 0.35),
+            "qk_injection_until",
+            getattr(
+                self.diffusion_sampler,
+                "edit_t_min",
+                getattr(self.diffusion_sampler, "t_start", 0.72),
+            ),
         )
         t_start = [
             float(m.get("t_start", default_start)) for m in metadatas
@@ -29,11 +33,16 @@ class EditLightningModel(LightningModel):
                 "All samples in an edit prediction batch must use the same t_start"
             )
 
-        edit_strength = torch.tensor(
+        structure_strength = torch.tensor(
             [
-                float(m.get("edit_strength", m.get("source_strength", 1.0)))
+                float(m.get("structure_strength", m.get("source_strength", 1.0)))
                 for m in metadatas
             ],
+            device=noise.device,
+            dtype=noise.dtype,
+        )
+        edit_strength = torch.tensor(
+            [float(m.get("edit_strength", 1.0)) for m in metadatas],
             device=noise.device,
             dtype=noise.dtype,
         )
@@ -46,7 +55,7 @@ class EditLightningModel(LightningModel):
         model = self.denoiser if self.eval_original_model else self.ema_denoiser
         kwargs = dict(
             source_image=source_image,
-            source_strength=edit_strength,
+            source_strength=structure_strength,
             t_start=t_start[0],
         )
         if getattr(self.diffusion_sampler, "requires_source_condition", False):
