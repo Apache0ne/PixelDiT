@@ -1,0 +1,81 @@
+seed_everything: true
+per_run_seed: true
+tags:
+  exp: &exp pixeldit2_h16_in256_pnp_edit
+torch_hub_dir: null
+huggingface_cache_dir: null
+auto_resume: false
+trainer:
+  default_root_dir: ./edit_outputs/
+  accelerator: gpu
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  precision: bf16-mixed
+  logger: false
+  num_sanity_val_steps: 0
+  inference_mode: true
+  use_distributed_sampler: false
+  callbacks:
+    - class_path: src.utils.SaveImagesHook
+      init_args:
+        save_dir: pnp_edits
+        save_compressed: false
+        predict_tag: results
+model:
+  num_classes: 1000
+  eval_original_model: false
+  denoiser:
+    class_path: pixdit_core.pixeldit2_c2i.PixelDiT2
+    init_args:
+      in_channels: 3
+      patch_size: 16
+      hidden_size: 1280
+      num_heads: 16
+      depth: 32
+      num_classes: 1000
+      in_context_len: 32
+      in_context_start: 8
+      attn_dropout: 0.0
+      proj_dropout: 0.0
+      mlp_hidden_multiple: 0
+      grounding_encoder: dinov3_vits16
+      grounding_proj_blocks: 1
+      grounding_proj_heads: 16
+      single_silu_cond: false
+      pretrained_encoder: true
+      pretrained_checkpoint: pixeldit2_h16_in256_ep600.ckpt
+      pretrained_weights: ema
+      lora_rank: 0
+  diffusion_trainer: null
+  diffusion_sampler:
+    class_path: src.pnp_pixeldit2.PixelDiT2PnPEditSampler
+    init_args:
+      num_steps: 40
+      guidance: 2.4
+      guidance_interval_min: 0.10
+      guidance_interval_max: 0.90
+      qk_injection_strength: 0.90
+      qk_injection_until: 0.72
+      qk_fade_start: 0.45
+      qk_block_start: 0
+      qk_block_end: 20
+      solver: heun
+      noise_scale: 1.0
+      t_eps: 0.05
+  ema_tracker: null
+  optimizer:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 1e-4
+data:
+  train_dataset: null
+  eval_dataset: null
+  pred_dataset:
+    class_path: src.edit_data.EditPredictionDataset
+    init_args:
+      manifest: ./edit_data/eval.jsonl
+      root: ./edit_data
+      image_size: 256
+  pred_batch_size: 1
+  pred_num_workers: 1
