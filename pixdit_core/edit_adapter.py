@@ -43,15 +43,16 @@ def edit_state_dict(
 
 
 def _metadata(model, extra: Optional[Mapping[str, object]] = None) -> Dict[str, str]:
+    trainable_count = getattr(model, "edit_trainable_params", None)
+    if trainable_count is None:
+        trainable_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
     metadata = {
         "format": "pixeldit2-edit-adapter-v1",
         "model_class": type(model).__name__,
         "source_projection": str(getattr(model, "source_projection", "unknown")),
         "source_projection_t": str(getattr(model, "source_projection_t", "unknown")),
         "lora_rank": str(getattr(model, "lora_rank", 0)),
-        "trainable_parameters": str(
-            sum(p.numel() for p in model.parameters() if p.requires_grad)
-        ),
+        "trainable_parameters": str(trainable_count),
     }
     if extra:
         for key, value in extra.items():
