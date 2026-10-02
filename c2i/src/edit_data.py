@@ -24,7 +24,7 @@ def _tensor(image):
 
 
 class PairedEditDataset(Dataset):
-    """JSONL pairs: {source, target, target_class}."""
+    """JSONL pairs: {source, target, target_class, source_class?}."""
 
     def __init__(
         self,
@@ -69,7 +69,14 @@ class PairedEditDataset(Dataset):
 
 
 class EditPredictionDataset(Dataset):
-    """JSONL inference items: {source, target_class, seed?, filename?, t_start?}."""
+    """JSONL inference items for PixelDiT2 editing.
+
+    Required: ``source`` and ``target_class``.
+    Optional: ``source_class``, ``seed``, ``filename``, ``t_start`` and
+    ``edit_strength``. A negative/missing source class means image-only source
+    conditioning: the FlowEdit sampler uses the null class but keeps frozen-DINO
+    grounding active on the source trajectory.
+    """
 
     def __init__(
         self,
@@ -102,13 +109,21 @@ class EditPredictionDataset(Dataset):
             "filename",
             f"{_clean_filename(Path(item['source']).stem)}_to_{target_class}_{seed}",
         )
+        edit_strength = float(
+            item.get("edit_strength", item.get("source_strength", 1.0))
+        )
         metadata = {
             "source_image": source_norm,
+            "source_class": int(item.get("source_class", -1)),
             "filename": filename,
             "seed": seed,
             "condition": target_class,
-            "t_start": float(item.get("t_start", 0.70)),
-            "source_strength": float(item.get("source_strength", 1.0)),
+            # For FlowEdit this is the first data-time at which transport is
+            # integrated, not an SDEdit partial-noise initialization strength.
+            "t_start": float(item.get("t_start", 0.35)),
+            "edit_strength": edit_strength,
+            # Kept for compatibility with the older source-adapter sampler.
+            "source_strength": edit_strength,
             "save_fn": _save_fn,
         }
         return noise, target_class, metadata
