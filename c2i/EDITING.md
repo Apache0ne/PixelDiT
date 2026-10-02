@@ -1,137 +1,157 @@
 # PixelDiT2 image-to-image editing
 
-This branch adds an opt-in image-editing path on top of the released PixelDiT2 class-to-image model. The original C2I model is unchanged.
+This branch provides two separate editing paths. They are intentionally not mixed:
 
-## Why the first zero-shot method was replaced
+1. **Training-free PnP editing** — the primary zero-shot editor for the released H/16 checkpoint.
+2. **Trainable source-DINO adapter** — LoRA + source projection + gates for later distillation/fine-tuning.
 
-The first implementation used SDEdit-style partial noising:
+The original C2I implementation on `exp` is unchanged.
 
-```text
-x_start = t_start * source + (1 - t_start) * noise
-```
+## Why the first partial-noise editor was removed
 
-followed by target-class sampling. Real-image tests showed the wrong behavior: high `t_start` mostly reconstructed the input, while lower `t_start` damaged the source without reliably moving it toward the target class. PixelDiT2's frozen-DINO grounding strongly reinforces the current image semantics, so simply changing the class label is not a strong enough edit direction.
+The original experiment initialized the target trajectory from a partially noised source image while keeping PixelDiT2's normal DINO grounding active. Real-image tests showed the expected failure: high source strength reconstructed the original object almost exactly, while stronger noising damaged the source without reliably changing its class.
 
-The default zero-shot sampler is now a FlowEdit-style source-to-target transport.
+The source pixels and frozen-DINO semantics were both pushing the target trajectory back toward the original class. This is not the zero-shot editing path anymore.
 
-## Zero-shot FlowEdit transport
+## Primary zero-shot method: PnP structural attention
 
-PixelDiT2 is trained with data-time
+`src.pnp_pixeldit2.PixelDiT2PnPEditSampler` starts the target trajectory from **pure noise**, exactly like normal PixelDiT2 generation.
 
-```text
-x_t = t * x_data + (1 - t) * noise
-```
-
-and its predicted data-direction velocity is
+A synchronized source trajectory is available analytically from PixelDiT2's training path:
 
 ```text
-v(x_t,t,c) = (x_pred - x_t) / (1 - t)
+x_source(t) = t * source + (1 - t) * noise
 ```
 
-For an input image `x_src`, source class `c_src`, and target class `c_tar`, the new sampler keeps a clean edit state `z_edit`, initialized to the source image. At each time it creates synchronized source/target states:
+At early/middle sampling times the source branch and target branch are run through the same frozen PixelDiT2. Selected self-attention blocks use:
 
 ```text
-x_src_t = t * x_src + (1 - t) * noise
-x_tar_t = z_edit + x_src_t - x_src
+Q_target <- blend(Q_target, Q_source)
+K_target <- blend(K_target, K_source)
+V_target <- V_target
 ```
 
-then evaluates both PixelDiT2 vector fields and integrates their difference:
+The target branch keeps its own:
+
+- target class embedding
+- target AdaLN modulation
+- target attention values V
+- target MLP activations
+- target final layer
+
+After class-context tokens are inserted, their Q/K remain target-owned; only spatial patch-token Q/K are injected from the source.
+
+This is the transformer adaptation of Plug-and-Play diffusion feature/self-attention injection: source attention geometry preserves layout, while target values/conditioning are free to change appearance and class.
+
+The same frozen DINOv3 used by PixelDiT2 remains active on the synchronized source trajectory and on the conditional target trajectory. Nothing is trained for this mode.
+
+### Default zero-shot config
 
 ```text
-delta_v = v_target(x_tar_t, t, c_tar) - v_source(x_src_t, t, c_src)
-z_edit  = z_edit + dt * delta_v
+c2i/configs/pixeldit2_h16_in256_pnp_edit.yaml
 ```
 
-This is inversion-free and does not need a trained edit adapter.
-
-The source class is optional. If it is missing or negative, the source branch uses the null class but **keeps PixelDiT2's frozen-DINO grounding active**, giving an image-only source condition.
-
-## Guidance
-
-Each source/target field is evaluated with PixelDiT2's native CFG definition. The default recipe uses:
+It uses the released `PixelDiT2` class directly:
 
 ```text
-source_guidance = 1.0
-target_guidance = 3.0
+PixelDiT2 H/16 256
+official EMA checkpoint
+LoRA rank = 0
+no source projector
+no source gates
+no trainable edit weights
 ```
 
-Source and target conditional/unconditional predictions are packed into one model forward per FlowEdit sample.
-
-## Velocity-prior localization
-
-`PixelDiT2FlowEditSampler` also provides `localization: velocity_prior`.
-
-It computes the source/target velocity difference **without asymmetric CFG**, temporally aggregates its per-pixel magnitude, and uses that prior to attenuate the normal guided update outside edit-relevant areas. This follows the guidance-decoupling idea behind newer FlowEdit localization work, but is intentionally described as a PixelDiT2-specific velocity prior rather than an exact reproduction of another implementation.
-
-Set:
+Default controls:
 
 ```yaml
-localization: none
+num_steps: 40
+guidance: 2.4
+qk_injection_strength: 0.90
+qk_injection_until: 0.72
+qk_fade_start: 0.45
+qk_block_start: 0
+qk_block_end: 20
+solver: heun
 ```
-
-for plain FlowEdit.
-
-## Trainable source-DINO adapter
-
-The branch still includes `PixelDiT2Edit` for later distillation/fine-tuning:
-
-```text
-noisy state x_t -> frozen DINOv3 -> pretrained P_g -----------+
-                                                               +-> spatial AdaLN -> PixelDiT2
-clean source ----> same frozen DINOv3 -> source P_src -> gates +
-```
-
-- DINOv3 remains frozen.
-- `P_src` defaults to a clone of the released checkpoint's pretrained `P_g`.
-- Source gates are zero initialized, per block and per channel.
-- With zero source gates the edit model is exactly the pretrained C2I model.
-- Transformer LoRA remains supported.
-- The deployable edit adapter contains LoRA + `P_src` + source gates, not the frozen base.
-
-The intended training workflow is now to use the zero-shot FlowEdit sampler as a teacher to generate source/target pairs, then distill those edits into this smaller direct source-conditioned adapter.
-
-## Training data
-
-`PairedEditDataset` reads JSONL rows:
-
-```json
-{"source":"pairs/0001_source.png","target":"pairs/0001_target.png","source_class":207,"target_class":281}
-```
-
-The target image is used by the normal PixelDiT2 flow-matching objective. The clean source is conditioning only.
-
-## Train
-
-Single GPU / Colab:
-
-```bash
-cd c2i
-bash train_edit.sh --num-gpus 1 --config configs/pixeldit2_h16_in256_edit_lora.yaml
-```
-
-Regular Lightning checkpoints support exact resume. Small deployable edit adapters are written to `<run>/edit_adapters/`.
 
 ## Inference manifest
 
-Recommended FlowEdit manifest:
-
 ```json
-{"source":"inputs/dog.png","source_class":207,"target_class":282,"seed":1234,"t_start":0.35,"edit_strength":1.0}
+{
+  "source": "images/horse.jpg",
+  "source_class": 339,
+  "target_class": 340,
+  "seed": 1234,
+  "t_start": 0.72,
+  "structure_strength": 1.0,
+  "edit_strength": 1.0,
+  "filename": "horse_to_zebra"
+}
 ```
 
-`source_class` is optional. `t_start` is retained as a compatibility key, but under FlowEdit it now means the **first PixelDiT data-time at which transport is integrated**, not the amount of source pixels mixed with noise.
+`source_class` is optional. A missing or negative value uses the null ImageNet class while retaining the source branch's frozen-DINO grounding. Supplying the correct source class is preferred for class-to-class ImageNet edits.
 
-Lower `t_start` exposes the transport to a larger/noisier part of the vector field and generally allows more structural change. Higher `t_start` is more conservative.
+### Controls
+
+`target_class`
+: Desired ImageNet class.
+
+`t_start`
+: Legacy field retained for compatibility. In the PnP editor it means **structure injection cutoff**, not partial-noise strength. Larger values preserve source layout for more of the target trajectory.
+
+`structure_strength`
+: Scales source Q/K injection. `1.0` is the default. Lower values release source geometry; higher values preserve it more strongly.
+
+`edit_strength`
+: Scales classifier-free target guidance around guidance=1. `1.0` gives the configured CFG value, `0.0` reduces it to ordinary conditional scale 1.
+
+## Trainable direct editor
+
+The separate `PixelDiT2Edit` class remains for a future fast direct editor:
+
+```text
+noisy target state -> frozen DINOv3 -> pretrained P_g --------+
+                                                               +-> spatial AdaLN -> PixelDiT2
+clean source ------> same frozen DINOv3 -> P_src -> gates -----+
+```
+
+The source projector and gates are **not** expected to edit before training. Their zero initialization is deliberately exact-base behavior.
+
+The training recipe is:
+
+```text
+c2i/configs/pixeldit2_h16_in256_edit_lora.yaml
+```
+
+Trainable parameters are transformer LoRA + source projector + source gates while PixelDiT2 base and DINOv3 remain frozen. A practical later path is to distill successful PnP/paired edits into this adapter.
+
+## Validation
+
+PnP regression harness:
+
+```bash
+python tools/test_pixeldit2_pnp_colab.py
+```
+
+It verifies:
+
+- zero Q/K injection reproduces normal PixelDiT2
+- source changes have no effect with injection disabled
+- source changes do affect target generation with Q/K control enabled
+- outputs remain finite
+- the editor changes no model parameter
+- the zero-shot config contains no LoRA or untrained source adapter
+
+The older FlowEdit experiment remains in `src/flowedit_pixeldit2.py` for comparison, but it is no longer the default editor.
 
 ## Important files
 
-- `c2i/src/flowedit_pixeldit2.py` — default training-free source-to-target FlowEdit sampler
-- `pixdit_core/pixeldit2_edit.py` — trainable clean-source DINO edit model
-- `pixdit_core/edit_adapter.py` — edit adapter save/load/checkpoint callback
-- `c2i/src/edit_diffusion.py` — paired edit trainer + legacy partial-noise samplers for ablation
-- `c2i/src/edit_data.py` — paired training and prediction datasets
-- `c2i/src/edit_lightning.py` — metadata-aware prediction wrapper
-- `tools/test_pixeldit2_flowedit_colab.py` — focused FlowEdit transport validation
-- `c2i/main_edit.py` — Lightning CLI entry point
-- `c2i/train_edit.sh` — training launcher
-- `c2i/configs/pixeldit2_h16_in256_edit_lora.yaml` — H/16 256 recipe
+- `c2i/src/pnp_pixeldit2.py` — primary zero-shot PnP attention editor
+- `c2i/configs/pixeldit2_h16_in256_pnp_edit.yaml` — clean released-model PnP config
+- `c2i/src/edit_data.py` — source/target manifest loader and independent controls
+- `c2i/src/edit_lightning.py` — edit prediction wrapper
+- `tools/test_pixeldit2_pnp_colab.py` — PnP regression tests
+- `pixdit_core/pixeldit2_edit.py` — trainable source-DINO adapter model
+- `pixdit_core/edit_adapter.py` — adapter serialization
+- `c2i/configs/pixeldit2_h16_in256_edit_lora.yaml` — trainable direct-editor recipe
