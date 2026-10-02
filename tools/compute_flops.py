@@ -12,6 +12,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from pixdit_core.pixeldit_c2i import PixDiT, PiTBlock
+from pixdit_core.pixeldit2_c2i import PixelDiT2
 from pixdit_core.pixeldit_t2i import PixDiT_T2I, MMDiTJointAttention
 from pixdit_core.modules import RotaryAttention
 import pixdit_core.modules as _pixdit_modules
@@ -30,10 +31,15 @@ class FlopsCounter:
         for m in model.modules():
             if isinstance(m, nn.Linear):
                 self._handles.append(m.register_forward_hook(self._linear_hook))
+            elif isinstance(m, nn.Conv2d):
+                self._handles.append(m.register_forward_hook(self._conv_hook))
             elif isinstance(m, RotaryAttention):
                 self._handles.append(m.register_forward_pre_hook(self._rotary_hook))
             elif isinstance(m, MMDiTJointAttention):
                 self._handles.append(m.register_forward_pre_hook(self._mmdit_hook))
+            elif "Attention" in type(m).__name__:
+                # Attention inside the frozen timm grounding encoder.
+                self._handles.append(m.register_forward_pre_hook(self._rotary_hook))
 
     def _linear_hook(self, mod, inp, out):
         x = inp[0]
@@ -41,6 +47,14 @@ class FlopsCounter:
             return
         n = x.numel() // x.shape[-1]
         self.total += 2 * n * mod.in_features * mod.out_features
+
+    def _conv_hook(self, mod, inp, out):
+        if not torch.is_tensor(out):
+            return
+        per_output = mod.in_channels // mod.groups
+        for k in mod.kernel_size:
+            per_output *= k
+        self.total += 2 * out.numel() * per_output
 
     def _rotary_hook(self, mod, inp):
         if not inp:
@@ -70,6 +84,31 @@ class FlopsCounter:
         self._handles.clear()
 
 
+def count_with_dispatcher(model, x, t, y):
+    """Count FLOPs for a conditional PixelDiT2 forward pass."""
+    from torch.utils.flop_counter import FlopCounterMode
+
+    original = torch.nn.functional.scaled_dot_product_attention
+
+    def explicit(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
+        scale = (query.shape[-1] ** -0.5) if scale is None else scale
+        logits = torch.matmul(query, key.transpose(-2, -1)) * scale
+        if attn_mask is not None:
+            logits = logits + attn_mask
+        return torch.matmul(torch.softmax(logits, dim=-1), value)
+
+    torch.nn.functional.scaled_dot_product_attention = explicit
+    _pixdit_modules.scaled_dot_product_attention = explicit
+    try:
+        counter = FlopCounterMode(display=False)
+        with counter, torch.no_grad():
+            model(x, t, y)
+        return int(counter.get_total_flops())
+    finally:
+        torch.nn.functional.scaled_dot_product_attention = original
+        _pixdit_modules.scaled_dot_product_attention = original
+
+
 def build_model(config_path):
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
@@ -77,9 +116,12 @@ def build_model(config_path):
     model_cfg = cfg.get("model", {})
 
     if "denoiser" in model_cfg:
-        init_args = model_cfg["denoiser"].get("init_args", {})
-        model = PixDiT(**init_args)
-        return model, "c2i", cfg
+        init_args = dict(model_cfg["denoiser"].get("init_args", {}))
+        class_path = model_cfg["denoiser"].get("class_path", "")
+        if class_path.endswith("PixelDiT2"):
+            init_args.setdefault("pretrained_encoder", False)
+            return PixelDiT2(**init_args), "c2i-v2", cfg
+        return PixDiT(**init_args), "c2i", cfg
 
     if "extra" in model_cfg:
         e = model_cfg["extra"]
@@ -111,8 +153,6 @@ def main():
     parser.add_argument("--width", type=int, default=256, help="Input image width (default: 256).")
     args = parser.parse_args()
 
-    _install_sdpa_stub()
-
     model, mode, cfg = build_model(args.config)
     H, W = args.height, args.width
     params = sum(p.numel() for p in model.parameters())
@@ -121,21 +161,25 @@ def main():
     x = torch.randn(1, 3, H, W)
     t = torch.tensor([0.5])
 
-    if mode == "c2i":
+    if mode.startswith("c2i"):
         y = torch.zeros(1, dtype=torch.long)
     else:
         e = cfg["model"]["extra"]
         y = torch.randn(1, int(e.get("txt_max_length", 300)), int(e.get("txt_embed_dim", 2304)))
 
-    with FlopsCounter(model) as fc, torch.no_grad():
-        model(x, t, y)
-        gflops = fc.total / 1e9
+    if mode == "c2i-v2":
+        gflops = count_with_dispatcher(model, x, t, y) / 1e9
+    else:
+        _install_sdpa_stub()
+        with FlopsCounter(model) as fc, torch.no_grad():
+            model(x, t, y)
+            gflops = fc.total / 1e9
 
-    print(f"Model:      PixelDiT ({mode})")
+    print(f"Model:      {'PixelDiT2' if mode == 'c2i-v2' else 'PixelDiT'} ({mode})")
     print(f"Config:     {os.path.basename(args.config)}")
     print(f"Parameters: {params / 1e6:.1f}M")
     print(f"Resolution: {H} x {W}")
-    print(f"GFLOPs:     {gflops:.2f}")
+    print(f"GFLOPs:     {gflops:.9f}")
 
 
 if __name__ == "__main__":

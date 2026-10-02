@@ -20,8 +20,11 @@ from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 
 class CustomINH5Dataset(Dataset):
-    def __init__(self, data_dir: str):
+    """HDF5 ImageNet dataset with optional random horizontal flips."""
+
+    def __init__(self, data_dir: str, random_flip: bool = False):
         PIL.Image.init()
+        self.random_flip = random_flip
         supported_ext = PIL.Image.EXTENSION.keys() | {'.npy'}
 
         self.data_dir = data_dir
@@ -65,6 +68,10 @@ class CustomINH5Dataset(Dataset):
         image_fname = self.filelist[index]
         image = self._load_h5_file(image_fname)
 
+        if self.random_flip and torch.rand(1).item() < 0.5:
+            # Flip the width axis of the CHW image.
+            image = np.ascontiguousarray(image[..., ::-1])
+
         image_tensor = torch.from_numpy(image).float() / 255.0
         normalized_image = (image_tensor - 0.5) / 0.5
 
@@ -74,6 +81,52 @@ class CustomINH5Dataset(Dataset):
             "class": target,
         }
         return normalized_image, target, metadata
+
+
+def center_crop_arr(pil_image, image_size):
+    """Center cropping implementation from ADM.
+
+    https://github.com/openai/guided-diffusion/blob/8fb3ad9197f16bbc40620447b2742e13458d2831/guided_diffusion/image_datasets.py#L126
+    """
+    while min(*pil_image.size) >= 2 * image_size:
+        pil_image = pil_image.resize(
+            tuple(x // 2 for x in pil_image.size), resample=PIL.Image.BOX
+        )
+    scale = image_size / min(*pil_image.size)
+    pil_image = pil_image.resize(
+        tuple(round(x * scale) for x in pil_image.size), resample=PIL.Image.BICUBIC
+    )
+    arr = np.array(pil_image)
+    crop_y = (arr.shape[0] - image_size) // 2
+    crop_x = (arr.shape[1] - image_size) // 2
+    return PIL.Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
+
+
+class ImageFolderDataset(Dataset):
+    """Raw ImageNet JPEGs, center-cropped at load time.
+
+    Used by the 512x512 recipe, which trains on native-resolution crops rather
+    than the pre-packed HDF5 archive.
+    """
+
+    def __init__(self, data_dir: str, image_size: int = 512, random_flip: bool = True):
+        from torchvision.datasets import ImageFolder
+
+        self.dataset = ImageFolder(os.path.join(data_dir, "train"))
+        self.image_size = image_size
+        self.random_flip = random_flip
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        image, target = self.dataset[index]
+        image = center_crop_arr(image.convert("RGB"), self.image_size)
+        if self.random_flip and random.random() < 0.5:
+            image = image.transpose(PIL.Image.FLIP_LEFT_RIGHT)
+        image_tensor = torch.from_numpy(np.array(image)).permute(2, 0, 1).float() / 255.0
+        normalized_image = (image_tensor - 0.5) / 0.5
+        return normalized_image, target, {"raw_image": image_tensor, "class": target}
 
 
 def _clean_filename(s: str) -> str:

@@ -25,6 +25,74 @@ import lightning.pytorch as pl
 import logging
 logger = logging.getLogger("lightning.pytorch")
 
+def _seed_from_token(token: str) -> int:
+    return int(hashlib.sha256(token.encode("utf-8")).hexdigest(), 16) % (2 ** 31 - 1)
+
+
+def _shared_run_token() -> Union[str, None]:
+    """Return a launch identifier shared by all distributed ranks."""
+    explicit = os.environ.get("PIXELDIT2_RUN_TOKEN")
+    if explicit:
+        return f"explicit:{explicit}"
+    elastic = os.environ.get("TORCHELASTIC_RUN_ID")
+    if elastic and elastic.lower() != "none":
+        return f"torchelastic:{elastic}"
+    job = os.environ.get("SLURM_JOB_ID") or os.environ.get("SLURM_JOBID")
+    if job:
+        restart = os.environ.get("SLURM_RESTART_COUNT", "0")
+        started = os.environ.get("SLURM_JOB_START_TIME", "0")
+        return f"slurm:{job}:{restart}:{started}"
+    return None
+
+
+def _wait_for_file(path: str, timeout_s: float = 120.0, interval_s: float = 0.1) -> bool:
+    start = time.time()
+    while time.time() - start < timeout_s:
+        if os.path.exists(path):
+            return True
+        time.sleep(interval_s)
+    return os.path.exists(path)
+
+
+def _derive_run_seed(rank: int, seed_file: str):
+    """Return a shared per-launch seed and its source."""
+    explicit_seed = os.environ.get("PIXELDIT2_RUN_SEED")
+    if explicit_seed:
+        try:
+            return int(explicit_seed) % (2 ** 31 - 1), "PIXELDIT2_RUN_SEED"
+        except ValueError:
+            logger.warning(f"Ignoring non-integer PIXELDIT2_RUN_SEED={explicit_seed!r}")
+
+    token = _shared_run_token()
+    if token is not None:
+        return _seed_from_token(token), token
+
+    def _fresh_seed() -> int:
+        try:
+            t = int(datetime.utcnow().timestamp() * 1e9)
+            mix = (t ^ (os.getpid() << 16) ^ int.from_bytes(os.urandom(16), 'big'))
+            return _seed_from_token(str(mix & ((1 << 128) - 1)))
+        except Exception:
+            return int(time.time()) % (2 ** 31 - 1)
+
+    if rank == 0:
+        return _fresh_seed(), "wall-clock"
+
+    logger.warning(
+        f"Rank {rank}: no shared launch token (TORCHELASTIC_RUN_ID / SLURM_JOB_ID), "
+        "falling back to run_seed.txt. On a resume that file may still hold the "
+        "previous run's seed; set PIXELDIT2_RUN_TOKEN to a value shared by all "
+        "ranks of this launch to make the per-run seed reliable."
+    )
+    if _wait_for_file(seed_file):
+        try:
+            with open(seed_file, 'r') as handle:
+                return int(handle.read().strip()), f"{seed_file} (may be stale)"
+        except Exception:
+            pass
+    return _fresh_seed(), "wall-clock (rank-local, ranks will disagree)"
+
+
 class ReWriteRootSaveConfigCallback(SaveConfigCallback):
     def save_config(self, trainer: Trainer, pl_module: LightningModule, stage: str) -> None:
         stamp = time.strftime('%y%m%d%H%M')
@@ -138,32 +206,20 @@ class ReWriteRootDirCli(LightningCLI):
         self.run_seed = None
         rank_int = 0
         if enable_per_run_seed:
-            # Establish per-run seed: ALWAYS new per process run (even when resuming)
+            # Use a shared seed for this launch and record it on rank zero.
             seed_file = os.path.join(default_root_dir, "run_seed.txt")
-
-            def _wait_for_file(path: str, timeout_s: float = 120.0, interval_s: float = 0.1) -> bool:
-                start = time.time()
-                while time.time() - start < timeout_s:
-                    if os.path.exists(path):
-                        return True
-                    time.sleep(interval_s)
-                return os.path.exists(path)
 
             rank_env = os.environ.get('RANK') or os.environ.get('SLURM_PROCID') or '0'
             try:
                 rank_int = int(rank_env)
             except Exception:
                 rank_int = 0
-            # Rank 0 generates a fresh seed and overwrites seed file; others wait and read
+
+            self.run_seed, seed_origin = _derive_run_seed(rank_int, seed_file)
+            logger.info(
+                f"Rank {rank_int} run seed {self.run_seed} (source: {seed_origin})"
+            )
             if rank_int == 0:
-                try:
-                    t = int(datetime.utcnow().timestamp() * 1e9)
-                    pid = os.getpid()
-                    ur = int.from_bytes(os.urandom(16), 'big')
-                    mix = (t ^ (pid << 16) ^ ur) & ((1 << 128) - 1)
-                    self.run_seed = int(hashlib.sha256(str(mix).encode('utf-8')).hexdigest(), 16) % (2**31 - 1)
-                except Exception:
-                    self.run_seed = int(time.time()) % (2**31 - 1)
                 try:
                     os.makedirs(default_root_dir, exist_ok=True)
                     with open(seed_file, 'w') as f:
@@ -171,19 +227,6 @@ class ReWriteRootDirCli(LightningCLI):
                     logger.info(f"Saved run seed {self.run_seed} to {seed_file}")
                 except Exception as e:
                     logger.warning(f"Failed to save run seed: {e}")
-            else:
-                # Non-zero ranks wait for seed_file to appear, then read
-                if _wait_for_file(seed_file):
-                    try:
-                        with open(seed_file, 'r') as f:
-                            self.run_seed = int(f.read().strip())
-                        logger.info(f"Rank {rank_int} loaded run seed {self.run_seed} from {seed_file}")
-                    except Exception:
-                        self.run_seed = None
-                if self.run_seed is None:
-                    # Fallback: time-based unique-ish seed
-                    self.run_seed = int(time.time()) % (2**31 - 1)
-                    logger.warning(f"Rank {rank_int} using fallback run seed {self.run_seed}")
         else:
             logger.info("per_run_seed disabled; skipping per-run seed generation/seeding")
         
@@ -192,12 +235,30 @@ class ReWriteRootDirCli(LightningCLI):
             os.makedirs(default_root_dir, exist_ok=True)
         # Apply seeding globally including dataloader workers
         if enable_per_run_seed and self.run_seed is not None:
+            self._apply_run_seed_to_datamodule()
             rank_seed = int(self.run_seed) + int(rank_int)
             pl.seed_everything(rank_seed, workers=True)
             logger.info(
                 f"Applied seed_everything with seed={rank_seed} (base={self.run_seed}, rank={rank_int}, workers=True)"
             )
         return trainer
+
+    def _apply_run_seed_to_datamodule(self) -> None:
+        """Set the distributed sampler seed unless the configuration specifies one."""
+        datamodule = getattr(self, "datamodule", None)
+        if datamodule is None or not hasattr(datamodule, "seed"):
+            return
+
+        configured = self._get(self.config, "data", default=None)
+        if isinstance(configured, dict):
+            configured_seed = configured.get("init_args", {}).get("seed")
+        else:
+            configured_seed = getattr(configured, "seed", None)
+        if configured_seed is not None:
+            return  # an explicit seed in the config wins
+
+        datamodule.seed = int(self.run_seed)
+        logger.info(f"DataModule sampler seed set to run seed {self.run_seed}")
 
     def instantiate_classes(self) -> None:
         torch_hub_dir = self._get(self.config, "torch_hub_dir")
@@ -207,13 +268,7 @@ class ReWriteRootDirCli(LightningCLI):
         if torch_hub_dir is not None:
             os.environ["TORCH_HOME"] = torch_hub_dir
             torch.hub.set_dir(torch_hub_dir)
-        # Inject run seed into datamodule init args if accepted
-        if hasattr(self, 'run_seed') and self.run_seed is not None:
-            config_dm = self._get(self.config, "data", default=None)
-            if config_dm is not None and isinstance(config_dm, dict):
-                # Avoid overriding explicit seed if provided in YAML
-                config_dm.setdefault("init_args", {})
-                config_dm["init_args"].setdefault("seed", int(self.run_seed))
+        # The datamodule seed is set after the trainer is instantiated.
         super().instantiate_classes()
     
     def fit(self, **kwargs) -> None:

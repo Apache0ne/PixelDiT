@@ -46,8 +46,14 @@ class SimpleEMA(Callback):
         self.ema_params = []
 
     def setup_models(self, net: torch.nn.Module, ema_net: torch.nn.Module):
-        self.net_params = list(net.parameters())
-        self.ema_params = list(ema_net.parameters())
+        # Update EMA only for trainable parameters.
+        pairs = [
+            (param, ema_param)
+            for param, ema_param in zip(net.parameters(), ema_net.parameters())
+            if param.requires_grad
+        ]
+        self.net_params = [param for param, _ in pairs]
+        self.ema_params = [ema_param for _, ema_param in pairs]
 
     def ema_step(self):
         @torch.no_grad()
@@ -152,10 +158,12 @@ class SaveImagesHook(Callback):
             self._saved_num += b
             self.save_image(trainer, pl_module, samples, metadata)
 
-        all_samples = pl_module.all_gather(samples).view(-1, c, h, w)
-        if trainer.is_global_zero:
-            all_samples = all_samples.permute(0, 2, 3, 1).cpu().numpy()
-            self.samples.append(all_samples)
+        # Gather samples only when writing a compressed archive.
+        if self.save_compressed:
+            all_samples = pl_module.all_gather(samples).view(-1, c, h, w)
+            if trainer.is_global_zero:
+                all_samples = all_samples.permute(0, 2, 3, 1).cpu().numpy()
+                self.samples.append(all_samples)
 
     def save_end(self):
         if self.save_compressed and len(self.samples) > 0:
@@ -416,6 +424,14 @@ class TimeProfiler:
         with open(self.export_path, "a") as f:
             json.dump(export_data, f)
             f.write("\n")
+
+    def summary(self):
+        """Print the final timing summary when profiling is enabled."""
+        if not self.enabled:
+            return
+        self.print_step_stats()
+        if self.export_json:
+            self._export_to_json()
 
     def print_step_stats(self):
         if not self.enabled or self.rank != 0:

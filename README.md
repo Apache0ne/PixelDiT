@@ -1,126 +1,160 @@
 <p align="center">
-  <img src="assets/pixeldit-logo.png" height="120" />
-</p>
- 
-<h2 align="center">PixelDiT: Pixel Diffusion Transformers for Image Generation</h2>
-
-<p align="center">
-  <a href="https://www.yongshengyu.com/">Yongsheng Yu</a><sup>1,2</sup> &nbsp;
-  <a href="https://wxiong.me/">Wei Xiong</a><sup>1†</sup> &nbsp;
-  <a href="https://weilinie.github.io/">Weili Nie</a><sup>1</sup> &nbsp;
-  <a href="https://shengcn.github.io/">Yichen Sheng</a><sup>1</sup> &nbsp;
-  <a href="http://behindthepixels.io/">Shiqiu Liu</a><sup>1</sup> &nbsp;
-  <a href="https://www.cs.rochester.edu/u/jluo/">Jiebo Luo</a><sup>2</sup>
-</p>
-<p align="center">
-  <sup>1</sup>NVIDIA &nbsp; <sup>2</sup>University of Rochester
-  <br>
-  <sup>†</sup>Project Lead and Main Advising
+  <img src="assets/pixeldit-logo.png" alt="PixelDiT" width="360">
 </p>
 
-<p align="center">
-  <a href="https://pixeldit.github.io/"><img src="https://img.shields.io/badge/%F0%9F%8C%90_-Project-2ea44f" /></a>
-  &nbsp;
-  <a href="https://arxiv.org/abs/2511.20645"><img src="https://img.shields.io/badge/%F0%9F%93%84_-arXiv-b31b1b.svg" /></a>
-  &nbsp;
-  <a href="https://huggingface.co/nvidia/PixelDiT-ImageNet"><img src="https://img.shields.io/badge/%F0%9F%A4%97_Model-ImageNet-yellow" /></a>
-  &nbsp;
-  <a href="https://huggingface.co/nvidia/PixelDiT-1300M-1024px"><img src="https://img.shields.io/badge/%F0%9F%A4%97_Model-T2I-yellow" /></a> &nbsp; 
-  <a href="https://paperswithcode.co/benchmark/imagenet-256x256?task=image-generation&eval=8057"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fpaperswithcode.co%2Fapi%2Fv1%2Fevaluations%2F8057&query=%24.best_rank&prefix=Rank%20%23&label=ImageNet%20256%C3%97256%20FID&color=blue" /></a> <br>
-  <a href="https://paperswithcode.co/conferences/cvpr-2026/best-paper-finalists"><img src="https://img.shields.io/badge/%F0%9F%8F%86_CVPR_2026-Best_Paper_Finalist-gold" /></a> &nbsp;
-</p>
+<h1 align="center">PixelDiT &amp; PixelDiT2</h1>
+<p align="center"><strong>Pixel-space diffusion transformers for image generation</strong></p>
+<p align="center">NVIDIA · University of Rochester</p>
 
-<p align="center">
-  <img src="assets/pixeldit-t2i.jpg" width="100%" />
-</p>
 
-PixelDiT is a single-stage, end-to-end pixel-space diffusion transformer that eliminates the VAE autoencoder entirely. It uses a dual-level architecture — patch-level DiT for global semantics + pixel-level DiT for texture details — to generate images directly in pixel space.
+![PixelDiT text-to-image samples](assets/pixeldit-t2i.jpg)
 
-- **1.61 FID** on ImageNet 256×256
-- **0.74 GenEval** / **83.5 DPG-Bench** on text-to-image at 1024×1024
-- No VAE, no latent space
 
-## 🔥 News 
+## Papers and Resources
 
-- **[2026/06]** Added a **post-modulation** option for the PiT (pixel-level) blocks that mitigates the training loss spikes ([#6](https://github.com/NVlabs/PixelDiT/issues/6)). See [c2i/README.md](c2i/README.md#training-stability-post-modulation-for-pit-blocks).
-- **[2026/06]** PixelDiT is selected as a CVPR 2026 Best Paper Finalist.
-- **[2026/04]** Training & inference code, and pre-trained models are released.
-- **[2026/02]** PixelDiT is accepted to CVPR 2026 Oral. 
-- **[2025/11]** [arxiv](https://arxiv.org/abs/2511.20645) is released.
+| Work | Publication | Resources |
+|---|---|---|
+| **PixelDiT2: Representation-Grounded Pixel Diffusion Transformers** | **NeurIPS 2026** | <a href="https://pixeldit.github.io/pixeldit2/"><img src="https://img.shields.io/badge/%F0%9F%8C%90_-Project-2ea44f" alt="Project"></a> <a href="https://arxiv.org/abs/2609.24919"><img src="https://img.shields.io/badge/%F0%9F%93%84_-arXiv-b31b1b.svg" alt="arXiv"></a> <a href="https://huggingface.co/nvidia/PixelDiT2-ImageNet"><img src="https://img.shields.io/badge/%F0%9F%A4%97_Model-ImageNet-yellow" alt="ImageNet models"></a> |
+| **PixelDiT: Pixel Diffusion Transformers for Image Generation** | **CVPR 2026 Oral**<br><a href="https://paperswithcode.co/conferences/cvpr-2026/best-paper-finalists"><img src="https://img.shields.io/badge/%F0%9F%8F%86_CVPR_2026-Best_Paper_Finalist-gold" alt="CVPR 2026 Best Paper Finalist"></a> | <a href="https://pixeldit.github.io/"><img src="https://img.shields.io/badge/%F0%9F%8C%90_-Project-2ea44f" alt="Project"></a> <a href="https://arxiv.org/abs/2511.20645"><img src="https://img.shields.io/badge/%F0%9F%93%84_-arXiv-b31b1b.svg" alt="arXiv"></a> <a href="https://huggingface.co/nvidia/PixelDiT-ImageNet"><img src="https://img.shields.io/badge/%F0%9F%A4%97_Model-ImageNet-yellow" alt="ImageNet models"></a> <a href="https://huggingface.co/nvidia/PixelDiT-1300M-1024px"><img src="https://img.shields.io/badge/%F0%9F%A4%97_Model-T2I-yellow" alt="T2I model"></a><br> <a href="https://huggingface.co/Comfy-Org/PixelDiT"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2FComfy-Org%2FPixelDiT%3Fexpand%3DdownloadsAllTime&query=%24.downloadsAllTime&label=%F0%9F%A4%97%20Comfy-Org%2FPixelDiT%20downloads&color=yellow" alt="Comfy-Org/PixelDiT downloads"></a>  |
 
-## Performance
+<details>
+<summary>Authors</summary>
 
-### ImageNet 256×256 (PixelDiT-XL, 797M params)
+**PixelDiT2**
 
-All evaluations use **FlowDPMSolver** with **100 steps**. 50K samples. Metrics follow ADM evaluation protocol.
+[Yongsheng Yu](https://www.yongshengyu.com/) ·
+[Wei Xiong](https://wxiong.me/) ·
+[Yichen Sheng](https://shengcn.github.io/) ·
+[Shiqiu Liu](http://behindthepixels.io/) ·
+[Jiebo Luo](https://www.cs.rochester.edu/u/jluo/)
 
-| Epoch | gFID↓ | CFG Scale | Steps | Sampler | Time Shift | CFG Interval |
-|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| 80  | **2.36** | 3.25 | 100 | FlowDPMSolver | 1.0 | [0.1, 1.0] |
-| 160 | **1.97**  | 3.25 | 100 | FlowDPMSolver | 1.0 | [0.1, 1.0] |
-| 320 | **1.61** | 2.75 | 100 | FlowDPMSolver | 1.0 | [0.1, 0.9] |
+**PixelDiT**
 
-### ImageNet 512×512 (PixelDiT-XL, 797M params)
+[Yongsheng Yu](https://www.yongshengyu.com/) ·
+[Wei Xiong](https://wxiong.me/) ·
+[Weili Nie](https://weilinie.github.io/) ·
+[Yichen Sheng](https://shengcn.github.io/) ·
+[Shiqiu Liu](http://behindthepixels.io/) ·
+[Jiebo Luo](https://www.cs.rochester.edu/u/jluo/)
 
-| Resolution | gFID↓ | CFG Scale | Steps | Sampler | Time Shift | CFG Interval |
-|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| 512×512 | **1.81** | 3.5 | 100 | FlowDPMSolver | 2.0 | [0.1, 1.0] |
+NVIDIA · University of Rochester. Project lead and main advisor: Wei Xiong.
 
-### Text-to-Image (PixelDiT-T2I, 1.3B params)
+</details>
 
-| Resolution | GenEval↑ | DPG-Bench↑ |
-|:---:|:---:|:---:|
-| 512×512  | 0.78 | 83.7 |
+## News
+
+- **2026/09** — [PixelDiT2](https://pixeldit.github.io/pixeldit2/) is accepted to **NeurIPS 2026**.
+- **2026/06** — PixelDiT is a **CVPR 2026 Best Paper Finalist**.
+- **2026/06** — Added [post-modulation for PiT blocks](c2i/README.md#training-stability-post-modulation-for-pit-blocks) to improve training stability.
+- **2026/04** — PixelDiT training and inference code, and pretrained models, are released.
+- **2026/02** — PixelDiT is accepted to **CVPR 2026 Oral**.
+- **2025/11** — The [PixelDiT paper](https://arxiv.org/abs/2511.20645) is released.
+
+<a id="pixeldit2"></a>
+<a id="pixeldit"></a>
+<a id="performance"></a>
+
+## Models and results
+
+> Note: Our models are resumed every 4 hours, using the timestamp as the random seed each time. As a result, the final training outcome may have a slight gap compared to a continuous run without intermediate resumes.
+
+### Class-to-image · ImageNet
+
+| Model | Resolution | Epochs | FID ↓ | IS ↑ |
+|---|:---:|---:|---:|---:|
+| **PixelDiT2-H/16** | 256×256 | 600 | **1.46** | **301.6** |
+| **PixelDiT2-H/16** | 512×512 | 680 | **1.48** | **295.7** |
+| PixelDiT-XL | 256×256 | 320 | 1.61 | — |
+| PixelDiT-XL | 512×512 | 850 | 1.81 | — |
+
+Results use 50,000 samples. PixelDiT2 uses Heun with 50 steps; PixelDiT uses
+FlowDPMSolver with 100 steps. The
+[class-to-image guide](c2i/README.md) lists all checkpoints and the corresponding
+sampling commands.
+
+### Text-to-image · PixelDiT-T2I
+
+
+| Resolution | GenEval ↑ | DPG-Bench ↑ |
+|:---:|---:|---:|
+| 512×512 | 0.78 | 83.7 |
 | 1024×1024 | 0.74 | 83.5 |
 
-## Getting Started
+See the [text-to-image guide](t2i/README.md) for training and inference.
 
-**Docker image** (recommended): `nvcr.io/nvidia/pytorch:24.09-py3`
+**ComfyUI.** PixelDiT-T2I is also available in [ComfyUI](https://github.com/comfyanonymous/ComfyUI). The [Comfy-Org/PixelDiT](https://huggingface.co/Comfy-Org/PixelDiT) repository provides repackaged weights (bf16 and mxfp8) and a ready-to-use [text-to-image workflow](https://github.com/Comfy-Org/workflow_templates/blob/main/templates/image_pixeldit_t2i.json). The repository also hosts [PiD](https://github.com/nv-tlabs/PiD).
 
-```bash
-pip install -r requirements.txt
-```
 
-## Tasks
+<a id="getting-started"></a>
 
-> **Note:** Our models are resumed every 4 hours, using the timestamp as the random seed each time. As a result, the final training outcome may have a slight gap compared to a continuous run without intermediate resumes.
+## Quick start
 
-### Class-to-Image Generation (ImageNet)
+Install the requirements for the model family you want to use, in separate
+Python environments:
 
-Training and evaluation instructions for class-conditioned generation on ImageNet 256×256 and 512×512.
+| Model family | Install from the repository root | Setup guide |
+|---|---|---|
+| PixelDiT2 | `python -m pip install -r requirements-pixeldit2.txt` | [PixelDiT2 environment](c2i/README.md#pixeldit2-environment) |
+| PixelDiT (C2I / T2I) | `python -m pip install -r requirements-pixeldit1.txt` | [PixelDiT environment](c2i/README.md#pixeldit-environment) |
 
-→ **[c2i/README.md](c2i/README.md)**
+PixelDiT2 uses Python 3.10 and pinned PyTorch/CUDA dependencies. The PixelDiT
+file retains the original dependency specification; `requirements.txt` remains
+its compatibility entrypoint. C2I evaluation also differs: PixelDiT2 uses the
+LTH14 torch-fidelity fork with JiT statistics, while PixelDiT uses ADM in a
+separate evaluation environment. See the guides for details.
 
-### Text-to-Image Generation
+For class-to-image generation, both model families use `c2i/main.py`.
+Choose a matching checkpoint and configuration in the
+[model list](c2i/README.md#pretrained-models), then follow the shared
+[inference](c2i/README.md#inference-and-evaluation) or
+[training](c2i/README.md#training) workflow.
 
-Multi-stage training (512px → 1024px) and inference for text-to-image generation.
-
-→ **[t2i/README.md](t2i/README.md)**
+| Model family | Class-to-image configurations | Guide |
+|---|---|---|
+| PixelDiT2 | `pixeldit2_h16_in256.yaml`, `pixeldit2_h16_in512.yaml` | [Inference](c2i/README.md#pixeldit2-inference) |
+| PixelDiT | `pix256_xl.yaml`, `pix512_xl.yaml` | [Inference](c2i/README.md#pixeldit-inference) |
 
 ## Repository Structure
 
 ```
-├── pixdit_core/      # Shared PixelDiT model definitions (c2i & t2i)
-├── tools/            # Shared utilities (checkpoint download, GFLOPs computation)
-├── c2i/              # Class-to-image
+├── pixdit_core/      # Shared model definitions
+│   ├── pixeldit2_c2i.py   # PixelDiT2  (single-path patch DiT + grounding)
+│   ├── grounding.py       # PixelDiT2  frozen DINOv3 encoder and projection P_g
+│   ├── pixeldit_c2i.py    # PixelDiT   (dual-level: patch DiT + pixel PiT)
+│   └── pixeldit_t2i.py    # PixelDiT   text-to-image
+├── tools/            # Checkpoint download, evaluation and GFLOPs computation
+├── c2i/              # Class-to-image (PixelDiT and PixelDiT2)
 └── t2i/              # Text-to-image
 ```
 
-## Compute GFLOPs
+<details>
+<summary>Compute model GFLOPs</summary>
 
-Measure single-forward-pass GFLOPs for any PixelDiT model (**run from project root**):
+### Compute GFLOPs
+
+Measure single-forward-pass GFLOPs for any model in this repository (**run from
+project root**). For PixelDiT2 the count includes the frozen grounding encoder.
 
 ```bash
-# C2I (ImageNet 256x256, default resolution)
+# PixelDiT2 (ImageNet 256x256 and 512x512)
+python tools/compute_flops.py --config c2i/configs/pixeldit2_h16_in256.yaml
+python tools/compute_flops.py --config c2i/configs/pixeldit2_h16_in512.yaml --height 512 --width 512
+```
+
+```bash
+# PixelDiT C2I (ImageNet 256x256, default resolution)
 python tools/compute_flops.py --config c2i/configs/pix256_xl.yaml
 ```
 
 ```bash
-# T2I at 1024x1024
+# PixelDiT T2I at 1024x1024
 python tools/compute_flops.py --config t2i/configs/PixelDiT_1024px_pixel_diffusion_stage3.yaml --height 1024 --width 1024
 ```
 
+</details>
+
 ## Acknowledgements
+
 We would like to thank the authors of [PixNerd](https://github.com/MCG-NJU/PixNerd) and [SANA](https://github.com/NVlabs/SANA) for sharing their code. We also thank the [SANA team](https://arxiv.org/pdf/2410.10629) for sharing their text-to-image training data.
 
 ## Citation
@@ -128,6 +162,13 @@ We would like to thank the authors of [PixNerd](https://github.com/MCG-NJU/PixNe
 If you find this work useful, please cite:
 
 ```bibtex
+@inproceedings{yu2026pixeldit2,
+      title={PixelDiT2: Representation-Grounded Pixel Diffusion Transformers},
+      author={Yongsheng Yu and Wei Xiong and Yichen Sheng and Shiqiu Liu and Jiebo Luo},
+      booktitle={Conference on Neural Information Processing Systems (NeurIPS)},
+      year={2026},
+}
+
 @inproceedings{yu2026pixeldit,
       title={PixelDiT: Pixel Diffusion Transformers for Image Generation},
       author={Yongsheng Yu and Wei Xiong and Weili Nie and Yichen Sheng and Shiqiu Liu and Jiebo Luo},

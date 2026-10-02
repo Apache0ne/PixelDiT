@@ -117,15 +117,20 @@ class RMSNorm(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, dim: int, hidden_dim: int):
+    def __init__(self, dim: int, hidden_dim: int, drop: float = 0.0, hidden_multiple: int = 0):
         super().__init__()
         hidden_dim = int(2 * hidden_dim / 3)
+        hidden_multiple = int(hidden_multiple)
+        if hidden_multiple > 0:
+            hidden_dim = ((hidden_dim + hidden_multiple - 1) // hidden_multiple) * hidden_multiple
         self.w1 = nn.Linear(dim, hidden_dim, bias=False)
         self.w3 = nn.Linear(dim, hidden_dim, bias=False)
         self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+        self.ffn_dropout = nn.Dropout(drop)
 
     def forward(self, x):
-        x = self.w2(torch.nn.functional.silu(self.w1(x)) * self.w3(x))
+        hidden = torch.nn.functional.silu(self.w1(x)) * self.w3(x)
+        x = self.w2(self.ffn_dropout(hidden))
         return x
 
 
@@ -248,4 +253,75 @@ class FinalLayer(nn.Module):
         x = self.norm(x)
         x = self.linear(x)
         return x
+
+
+class PatchTokenEmbedder(nn.Module):
+    def __init__(
+            self,
+            in_chans: int = 3,
+            embed_dim: int = 768,
+            norm_layer = None,
+            bias: bool = True,
+    ):
+        super().__init__()
+        self.in_chans = in_chans
+        self.embed_dim = embed_dim
+        self.proj = nn.Linear(in_chans, embed_dim, bias=bias)
+        self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
+
+    def forward(self, x):
+        x = self.proj(x)
+        x = self.norm(x)
+        return x
+
+
+class ModulatedDiTBlock(nn.Module):
+    def __init__(
+        self,
+        hidden_size: int,
+        num_heads: int,
+        mlp_ratio: float = 4.0,
+        attn_drop: float = 0.0,
+        proj_drop: float = 0.0,
+        mlp_hidden_multiple: int = 0,
+    ):
+        super().__init__()
+        self.norm1 = RMSNorm(hidden_size, eps=1e-6)
+        self.attn = RotaryAttention(
+            hidden_size, num_heads=num_heads, qkv_bias=False,
+            attn_drop=attn_drop, proj_drop=proj_drop,
+        )
+        self.norm2 = RMSNorm(hidden_size, eps=1e-6)
+        self.mlp = FeedForward(
+            hidden_size, int(hidden_size * mlp_ratio),
+            drop=proj_drop, hidden_multiple=mlp_hidden_multiple,
+        )
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, 6 * hidden_size, bias=True),
+        )
+
+    def forward(self, x, c, pos, mask=None):
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=-1)
+        x = x + gate_msa * self.attn(apply_adaln(self.norm1(x), shift_msa, scale_msa), pos, mask=mask)
+        x = x + gate_mlp * self.mlp(apply_adaln(self.norm2(x), shift_mlp, scale_mlp))
+        return x
+
+
+class PatchFinalLayer(nn.Module):
+    def __init__(self, hidden_size: int, patch_size: int, out_channels: int):
+        super().__init__()
+        self.norm = RMSNorm(hidden_size, eps=1e-6)
+        self.linear = nn.Linear(hidden_size, patch_size * patch_size * out_channels, bias=True)
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, 2 * hidden_size, bias=True),
+        )
+
+    def forward(self, x, c):
+        shift, scale = self.adaLN_modulation(c).chunk(2, dim=-1)
+        if shift.dim() == 2:
+            shift = shift.unsqueeze(1)
+            scale = scale.unsqueeze(1)
+        return self.linear(apply_adaln(self.norm(x), shift, scale))
 

@@ -1,0 +1,142 @@
+seed_everything: true
+per_run_seed: true
+tags:
+  exp: &exp pixeldit2_h16_in512
+torch_hub_dir: null
+huggingface_cache_dir: null
+auto_resume: true
+trainer:
+  default_root_dir: ./train_logs/
+  accelerator: gpu
+  strategy: ddp
+  devices: 8
+  num_nodes: 8
+  precision: bf16-mixed
+  gradient_clip_val: null
+  logger:
+      class_path: lightning.pytorch.loggers.WandbLogger
+      init_args:
+        project: pix_dit_c2i
+        name: *exp
+  num_sanity_val_steps: 0
+  max_steps: 850000
+  val_check_interval: 50000
+  check_val_every_n_epoch: null
+  log_every_n_steps: 50
+  deterministic: null
+  inference_mode: true
+  use_distributed_sampler: false
+  callbacks:
+    - class_path: src.utils.CheckpointHook
+      init_args:
+        every_n_train_steps: 10000
+        save_top_k: -1
+        save_last: true
+    - class_path: src.utils.SaveImagesHook
+      init_args:
+         save_dir: val_512_h16
+         save_compressed: false
+model:
+  enable_profiling: false
+  profiling_print_freq: 1000
+  profiling_warmup_steps: 100
+  override_lr_on_resume: null
+  override_ema_decay_on_resume: null
+  num_classes: 1000
+  lr_scheduler_interval: step
+  denoiser:
+    class_path: pixdit_core.pixeldit2_c2i.PixelDiT2
+    init_args:
+        in_channels: 3
+        patch_size: 16
+        hidden_size: &hidden_dim 1280
+        num_heads: 16
+        depth: 32
+        num_classes: 1000
+        in_context_len: 32
+        in_context_start: 8
+        attn_dropout: 0.0
+        proj_dropout: 0.2
+        mlp_hidden_multiple: 32
+        grounding_encoder: dinov3_vitb16
+        grounding_proj_blocks: 1
+        grounding_proj_heads: 16
+        single_silu_cond: true
+  diffusion_trainer:
+    class_path: src.grounded_diffusion.GroundedFlowTrainer
+    init_args:
+      p_mean: -0.8
+      p_std: 0.8
+      noise_scale: 2.0
+      t_eps: 0.05
+      null_condition_p: 0.1
+      grounding_drop_mode: independent
+      grounding_drop_p: 0.1
+      grounding_joint_drop_p: 0.05
+      repa_weight: 0.5
+      repa_align_layer: 8
+      repa_encoder:
+        class_path: src.grounded_diffusion.REPATeacher
+        init_args:
+          model_name: dinov2_vitb14
+          bf16_weights: true
+          dinov2_pos_embed: true
+      proj_denoiser_dim: *hidden_dim
+      proj_hidden_dim: *hidden_dim
+      proj_encoder_dim: 768
+  diffusion_sampler:
+    class_path: src.grounded_diffusion.GroundedHeunSampler
+    init_args:
+      num_steps: 50
+      guidance: 2.1
+      guidance_interval_min: 0.1
+      guidance_interval_max: 0.925
+      noise_scale: 2.0
+      t_eps: 0.05
+  ema_tracker:
+    class_path: src.utils.SimpleEMA
+    init_args:
+      decay: 0.9999
+  optimizer:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 2e-4
+      betas:
+        - 0.9
+        - 0.95
+      weight_decay: 0.0
+  lr_scheduler:
+    class_path: torch.optim.lr_scheduler.LinearLR
+    init_args:
+      start_factor: 1e-8
+      end_factor: 1.0
+      total_iters: 6255
+data:
+  train_dataset:
+    class_path: src.data.ImageFolderDataset
+    init_args:
+      data_dir: ./imagenet512_data
+      image_size: 512
+      random_flip: true
+  eval_dataset:
+    class_path: src.data.ClassLabelRandomNDataset
+    init_args:
+      num_classes: 1000
+      max_num_instances: 50000
+      latent_shape:
+        - 3
+        - 512
+        - 512
+  pred_dataset:
+    class_path: src.data.ClassLabelRandomNDataset
+    init_args:
+      num_classes: 1000
+      max_num_instances: 50000
+      latent_shape:
+        - 3
+        - 512
+        - 512
+  train_batch_size: 16
+  train_num_workers: 4
+  pred_batch_size: 16
+  pred_num_workers: 1

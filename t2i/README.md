@@ -2,6 +2,16 @@
 
 PixelDiT-T2I text-to-image generation trained directly in pixel space at up to 1024×1024 resolution. Uses Gemma-2 as the text encoder and MM-DiT blocks for text-image fusion.
 
+## Setup
+
+Use the original PixelDiT environment. From the repository root:
+
+```bash
+python -m pip install -r requirements-pixeldit1.txt
+```
+
+Keep this environment separate from PixelDiT2's requirements.
+
 ## Inference
 
 ```bash

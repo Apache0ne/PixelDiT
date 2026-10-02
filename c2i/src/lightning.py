@@ -68,12 +68,14 @@ class LightningModel(pl.LightningModule):
                  ema_tracker: SimpleEMA=None,
                  optimizer: OptimizerCallable = None,
                  lr_scheduler: LRSchedulerCallable = None,
+                 lr_scheduler_interval: str = "step",
                  override_lr_on_resume: Optional[float] = None,
                  override_ema_decay_on_resume: Optional[float] = None,
                  eval_original_model: bool = False,
-                 enable_profiling: bool = True,
+                 enable_profiling: bool = False,
                  profiling_print_freq: int = 10,
                  profiling_warmup_steps: int = 5,
+                 log_grad_norm: bool = False,
                  conditioner: Optional[nn.Module] = None,
                  ):
         super().__init__()
@@ -85,6 +87,7 @@ class LightningModel(pl.LightningModule):
         self.ema_tracker = ema_tracker
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
+        self.lr_scheduler_interval = lr_scheduler_interval
         self.override_lr_on_resume = override_lr_on_resume
         self.override_ema_decay_on_resume = override_ema_decay_on_resume
 
@@ -95,6 +98,7 @@ class LightningModel(pl.LightningModule):
         self.enable_profiling = enable_profiling
         self.profiling_print_freq = profiling_print_freq
         self.profiling_warmup_steps = profiling_warmup_steps
+        self.log_grad_norm = log_grad_norm
         self.profiler = None
 
     def configure_model(self) -> None:
@@ -127,7 +131,10 @@ class LightningModel(pl.LightningModule):
             lr_scheduler = self.lr_scheduler(optimizer)
             return dict(
                 optimizer=optimizer,
-                lr_scheduler=lr_scheduler
+                lr_scheduler=dict(
+                    scheduler=lr_scheduler,
+                    interval=self.lr_scheduler_interval,
+                ),
             )
 
     def on_validation_start(self) -> None:
@@ -273,8 +280,10 @@ class LightningModel(pl.LightningModule):
         if optimizer_idx not in (None, 0):
             return
 
-        grad_norm = self._compute_grad_norm()
-        self.log("train/grad_norm", grad_norm, on_step=True, prog_bar=False, sync_dist=False)
+        # Compute gradient norms only when logging is enabled.
+        if self.log_grad_norm:
+            grad_norm = self._compute_grad_norm()
+            self.log("train/grad_norm", grad_norm, on_step=True, prog_bar=False, sync_dist=False)
 
         lrs = [group.get("lr", None) for group in optimizer.param_groups]
         lrs = [lr for lr in lrs if lr is not None]

@@ -1,0 +1,72 @@
+PixelDiT / PixelDiT2
+Copyright (c) NVIDIA Corporation
+
+This repository is released under the license in LICENSE. It contains code
+derived from the third-party projects listed below; their terms apply to the
+corresponding files.
+
+--------------------------------------------------------------------------------
+PixNerd — https://github.com/MCG-NJU/PixNerd
+
+  c2i/main.py
+  c2i/src/data.py
+  c2i/src/diffusion.py
+  c2i/src/lightning.py
+  c2i/src/utils.py
+  pixdit_core/modules.py
+  pixdit_core/pixeldit_c2i.py
+
+--------------------------------------------------------------------------------
+JiT — https://github.com/LTH14/JiT
+MIT License, Copyright (c) 2025 Tianhong Li
+
+  The PixelDiT2 backbone conventions (in-context class tokens, x-prediction with
+  a velocity-space loss, the clipped velocity conversion) and the ODE samplers
+  derive from this project.
+
+  pixdit_core/pixeldit2_c2i.py
+  c2i/src/grounded_diffusion.py
+
+--------------------------------------------------------------------------------
+guided-diffusion (ADM) — https://github.com/openai/guided-diffusion
+MIT License, Copyright (c) 2021 OpenAI
+
+  center_crop_arr in c2i/src/data.py.
+  The FID protocol follows the ADM evaluation suite.
+
+--------------------------------------------------------------------------------
+REPA / REPA-E — https://github.com/sihyun-yu/REPA,
+                https://github.com/End2End-Diffusion/REPA-E
+
+  The representation alignment loss and the ImageNet preprocessing pipeline.
+
+--------------------------------------------------------------------------------
+SANA — https://github.com/NVlabs/SANA
+Apache License 2.0
+
+  The t2i/ subtree; per-file SPDX headers apply.
+
+--------------------------------------------------------------------------------
+Pretrained encoder weights
+
+PixelDiT2 loads frozen vision encoders at runtime through `timm`; their weights
+are not redistributed here and are governed by their own licenses.
+
+  DINOv3 (grounding encoder) — Meta Platforms, DINOv3 License
+    timm/vit_small_patch16_dinov3_qkvb.lvd1689m
+    timm/vit_base_patch16_dinov3_qkvb.lvd1689m
+    timm/vit_large_patch16_dinov3_qkvb.lvd1689m
+
+  DINOv2 (REPA target, training only) — Meta Platforms, Apache License 2.0
+    timm/vit_base_patch14_dinov2.lvd142m
+
+The released PixelDiT2 checkpoints do not contain encoder weights. The frozen
+encoder weights are loaded from timm at runtime.
+
+--------------------------------------------------------------------------------
+FID reference statistics
+
+The ImageNet-256 and ImageNet-512 reference statistics used to reproduce the
+reported FID values are the files tracked in the JiT repository
+(https://github.com/LTH14/JiT, fid_stats/jit_in256_stats.npz and
+fid_stats/jit_in512_stats.npz). They are not redistributed here.
