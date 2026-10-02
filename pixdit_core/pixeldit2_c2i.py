@@ -1,12 +1,13 @@
 # Modified from https://github.com/MCG-NJU/PixNerd and https://github.com/LTH14/JiT
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from pixdit_core.grounding import GroundingConditioner
+from pixdit_core.lora import inject_lora, load_lora_adapter, lora_parameter_counts
 from pixdit_core.modules import (
     ClassEmbedder,
     ModulatedDiTBlock,
@@ -36,6 +37,14 @@ class PixelDiT2(nn.Module):
         grounding_proj_heads: Optional[int] = None,
         single_silu_cond: bool = False,
         pretrained_encoder: bool = True,
+        pretrained_checkpoint: Optional[str] = None,
+        pretrained_weights: str = "ema",
+        lora_rank: int = 0,
+        lora_alpha: float = 16.0,
+        lora_dropout: float = 0.0,
+        lora_target_modules: Optional[Sequence[str]] = None,
+        lora_exclude_modules: Optional[Sequence[str]] = None,
+        lora_adapter_path: Optional[str] = None,
     ):
         super().__init__()
         self.in_channels = in_channels
@@ -48,11 +57,26 @@ class PixelDiT2(nn.Module):
         self.in_context_len = in_context_len
         self.in_context_start = in_context_start
         self.single_silu_cond = single_silu_cond
+        self.pretrained_checkpoint = pretrained_checkpoint
+        self.pretrained_weights = pretrained_weights
+        self.lora_rank = int(lora_rank)
+        self.lora_alpha = float(lora_alpha)
+        self.lora_dropout = float(lora_dropout)
+        self.lora_target_modules = tuple(lora_target_modules) if lora_target_modules else None
+        self.lora_exclude_modules = tuple(lora_exclude_modules) if lora_exclude_modules else None
+        self.lora_adapter_path = lora_adapter_path
+        self.lora_injected_modules = []
 
         if not 0 <= in_context_start < depth:
             raise ValueError(
                 f"in_context_start must be in [0, {depth - 1}], got {in_context_start}"
             )
+        if pretrained_weights not in ("ema", "denoiser", "auto"):
+            raise ValueError("pretrained_weights must be one of: 'ema', 'denoiser', 'auto'")
+        if self.lora_rank < 0:
+            raise ValueError(f"lora_rank must be >= 0, got {self.lora_rank}")
+        if lora_adapter_path and self.lora_rank <= 0:
+            raise ValueError("lora_adapter_path requires lora_rank > 0")
 
         self.t_embedder = TimestepConditioner(hidden_size)
         self.y_embedder = ClassEmbedder(num_classes + 1, hidden_size)
@@ -87,6 +111,87 @@ class PixelDiT2(nn.Module):
             pretrained_encoder=pretrained_encoder,
         )
         self._pos_cache: Dict[Tuple[int, int, int], torch.Tensor] = {}
+
+        # LoRA fine-tuning must start from the normal (non-LoRA) parameter names.
+        # Load the released PixelDiT2 base first, then wrap selected Linear layers.
+        if self.pretrained_checkpoint:
+            self._load_pretrained_checkpoint(self.pretrained_checkpoint, self.pretrained_weights)
+
+        if self.lora_rank > 0:
+            self.lora_injected_modules = inject_lora(
+                self,
+                rank=self.lora_rank,
+                alpha=self.lora_alpha,
+                dropout=self.lora_dropout,
+                target_modules=self.lora_target_modules,
+                exclude_modules=self.lora_exclude_modules,
+            )
+            self.lora_trainable_params, self.lora_total_params = lora_parameter_counts(self)
+            if self.lora_adapter_path:
+                load_lora_adapter(self, self.lora_adapter_path, strict=True)
+        else:
+            self.lora_trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+            self.lora_total_params = sum(p.numel() for p in self.parameters())
+
+    @staticmethod
+    def _checkpoint_state(checkpoint):
+        if isinstance(checkpoint, dict):
+            state = checkpoint.get("state_dict")
+            if isinstance(state, dict):
+                return state
+        if isinstance(checkpoint, dict):
+            return checkpoint
+        raise TypeError(f"Unsupported checkpoint type: {type(checkpoint)!r}")
+
+    def _load_pretrained_checkpoint(self, checkpoint_path: str, source: str = "ema") -> None:
+        from tools.download import resolve_checkpoint
+
+        resolved = resolve_checkpoint(checkpoint_path)
+        checkpoint = torch.load(resolved, map_location="cpu", weights_only=False)
+        state = self._checkpoint_state(checkpoint)
+
+        if source == "ema":
+            prefixes = ("ema_denoiser.", "model.ema_denoiser.", "denoiser.", "model.denoiser.")
+        elif source == "denoiser":
+            prefixes = ("denoiser.", "model.denoiser.", "ema_denoiser.", "model.ema_denoiser.")
+        else:
+            prefixes = ("ema_denoiser.", "denoiser.", "model.ema_denoiser.", "model.denoiser.")
+
+        model_state = self.state_dict()
+        candidate = None
+        used_prefix = None
+        for prefix in prefixes:
+            stripped = {key[len(prefix):]: value for key, value in state.items() if key.startswith(prefix)}
+            matching = {
+                key: value
+                for key, value in stripped.items()
+                if key in model_state and tuple(value.shape) == tuple(model_state[key].shape)
+            }
+            if matching:
+                candidate = matching
+                used_prefix = prefix
+                break
+
+        if candidate is None:
+            raw_matching = {
+                key: value
+                for key, value in state.items()
+                if key in model_state and tuple(value.shape) == tuple(model_state[key].shape)
+            }
+            if raw_matching:
+                candidate = raw_matching
+                used_prefix = "<raw>"
+
+        if not candidate:
+            raise RuntimeError(
+                f"Could not find PixelDiT2 {source!r} weights in checkpoint {resolved!r}. "
+                f"Tried prefixes: {prefixes}"
+            )
+
+        self.load_state_dict(candidate, strict=False)
+        self.pretrained_checkpoint = checkpoint_path
+        self.pretrained_checkpoint_resolved = resolved
+        self.pretrained_checkpoint_prefix = used_prefix
 
     def initialize_weights(self):
         w = self.s_embedder.proj.weight.data
