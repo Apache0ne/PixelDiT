@@ -15,28 +15,49 @@ class EditLightningModel(LightningModel):
         source_image = torch.stack(
             [m["source_image"] for m in metadatas], dim=0
         ).to(noise.device)
-        t_start = [
-            float(m.get("t_start", self.diffusion_sampler.t_start))
-            for m in metadatas
-        ]
-        source_strength = torch.tensor(
-            [float(m.get("source_strength", 1.0)) for m in metadatas],
-            device=noise.device,
-            dtype=noise.dtype,
+
+        default_start = getattr(
+            self.diffusion_sampler,
+            "edit_t_min",
+            getattr(self.diffusion_sampler, "t_start", 0.35),
         )
+        t_start = [
+            float(m.get("t_start", default_start)) for m in metadatas
+        ]
         if max(t_start) - min(t_start) > 1e-8:
             raise ValueError(
                 "All samples in an edit prediction batch must use the same t_start"
             )
 
+        edit_strength = torch.tensor(
+            [
+                float(m.get("edit_strength", m.get("source_strength", 1.0)))
+                for m in metadatas
+            ],
+            device=noise.device,
+            dtype=noise.dtype,
+        )
+        source_condition = torch.tensor(
+            [int(m.get("source_class", -1)) for m in metadatas],
+            device=noise.device,
+            dtype=torch.long,
+        )
+
         model = self.denoiser if self.eval_original_model else self.ema_denoiser
+        kwargs = dict(
+            source_image=source_image,
+            source_strength=edit_strength,
+            t_start=t_start[0],
+        )
+        if getattr(self.diffusion_sampler, "requires_source_condition", False):
+            kwargs["source_condition"] = source_condition
+            kwargs["edit_strength"] = edit_strength
+
         samples = self.diffusion_sampler(
             model,
             noise,
             condition,
             uncondition,
-            source_image=source_image,
-            source_strength=source_strength,
-            t_start=t_start[0],
+            **kwargs,
         )
         return fp2uint8(samples)
