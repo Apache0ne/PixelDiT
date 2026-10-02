@@ -76,7 +76,7 @@ model:
         - patch_blocks.*.attn.qkv
         - patch_blocks.*.attn.proj
         - patch_blocks.*.mlp.w1
-        - patch_blocks.*.mllp.w2
+        - patch_blocks.*.mlp.w2
         - patch_blocks.*.mlp.w3
       lora_exclude_modules: null
       lora_adapter_path: null
