@@ -82,7 +82,7 @@ model:
         lora_exclude_modules: null
         lora_adapter_path: null
   diffusion_trainer:
-    class_path: src.grounded_diffusion.GroundedFlowTrainer
+    class_path: src.lora_diffusion.LoRAGroundedFlowTrainer
     init_args:
       p_mean: -0.8
       p_std: 0.8
