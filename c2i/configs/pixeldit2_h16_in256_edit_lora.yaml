@@ -104,28 +104,19 @@ model:
       proj_denoiser_dim: *hidden_dim
       proj_hidden_dim: *hidden_dim
       proj_encoder_dim: 768
-  # Zero-shot validation now uses true source->target FlowEdit transport instead
-  # of partial-noise SDEdit. The trainable source-DINO adapter remains available
-  # and can later be distilled from FlowEdit-generated pairs.
+  # This sampler is for validation after the source-DINO adapter has been trained.
+  # Zero-shot editing uses pixeldit2_h16_in256_pnp_edit.yaml instead.
   diffusion_sampler:
-    class_path: src.flowedit_pixeldit2.PixelDiT2FlowEditSampler
+    class_path: src.edit_diffusion.EditGroundedHeunSampler
     init_args:
-      num_steps: 28
-      n_avg: 1
-      source_guidance: 1.0
-      target_guidance: 3.0
-      edit_t_min: 0.35
-      edit_t_max: 0.95
-      edit_strength: 1.0
+      num_steps: 50
+      source_guidance: 1.25
+      edit_guidance: 2.4
+      t_start: 0.70
+      guidance_interval_min: 0.125
+      guidance_interval_max: 0.90
       noise_scale: 1.0
       t_eps: 0.05
-      terminal_steps: 0
-      localization: velocity_prior
-      localization_strength: 0.75
-      localization_ema: 0.85
-      localization_quantile: 0.80
-      localization_floor: 0.20
-      localization_power: 1.0
   ema_tracker:
     class_path: src.utils.SimpleEMA
     init_args:
