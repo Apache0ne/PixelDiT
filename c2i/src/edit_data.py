@@ -24,7 +24,7 @@ def _tensor(image):
 
 
 class PairedEditDataset(Dataset):
-    """JSONL pairs: {source, target, target_class, source_class?}."""
+    """JSONL pairs: {source, target, target_class}."""
 
     def __init__(
         self,
@@ -72,10 +72,15 @@ class EditPredictionDataset(Dataset):
     """JSONL inference items for PixelDiT2 editing.
 
     Required: ``source`` and ``target_class``.
-    Optional: ``source_class``, ``seed``, ``filename``, ``t_start`` and
-    ``edit_strength``. A negative/missing source class means image-only source
-    conditioning: the FlowEdit sampler uses the null class but keeps frozen-DINO
-    grounding active on the source trajectory.
+
+    Optional controls:
+      - ``source_class``: ImageNet source class. Missing/negative keeps source DINO
+        grounding but uses the null class for source structural extraction.
+      - ``t_start``: legacy field now interpreted by the PnP editor as the time
+        through which source structure is injected. Higher = more preservation.
+      - ``structure_strength``: scales source Q/K structural injection.
+      - ``edit_strength``: scales target classifier-free guidance around 1.0.
+      - ``source_strength``: backward-compatible alias for structure_strength.
     """
 
     def __init__(
@@ -109,21 +114,21 @@ class EditPredictionDataset(Dataset):
             "filename",
             f"{_clean_filename(Path(item['source']).stem)}_to_{target_class}_{seed}",
         )
-        edit_strength = float(
-            item.get("edit_strength", item.get("source_strength", 1.0))
+        structure_strength = float(
+            item.get("structure_strength", item.get("source_strength", 1.0))
         )
+        edit_strength = float(item.get("edit_strength", 1.0))
         metadata = {
             "source_image": source_norm,
             "source_class": int(item.get("source_class", -1)),
             "filename": filename,
             "seed": seed,
             "condition": target_class,
-            # For FlowEdit this is the first data-time at which transport is
-            # integrated, not an SDEdit partial-noise initialization strength.
-            "t_start": float(item.get("t_start", 0.35)),
+            "t_start": float(item.get("t_start", 0.72)),
+            "structure_strength": structure_strength,
             "edit_strength": edit_strength,
-            # Kept for compatibility with the older source-adapter sampler.
-            "source_strength": edit_strength,
+            # Backward compatibility with the older source-adapter sampler.
+            "source_strength": structure_strength,
             "save_fn": _save_fn,
         }
         return noise, target_class, metadata
